@@ -1,0 +1,7 @@
+.idea
+cache
+log
+.env
+__pycache__
+.venv
+dist
