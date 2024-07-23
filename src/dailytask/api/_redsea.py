@@ -185,7 +185,7 @@ class RedSea:
         url = "/RedseaPlatform/kqCommonDaka.mc"
         headers = {
             "Referer": f"https://{self.hostname}/RedseaPlatform/jsp/kqUni/punchCard/punchCard.jsp?agentId"
-                       f"={self.agent_id}=&isQywx=1",
+            f"={self.agent_id}=&isQywx=1",
         }
         params = {
             "method": "daka",
@@ -220,7 +220,7 @@ class RedSea:
         url = "/RedseaPlatform/dingDingKqInteface.mc"
         headers = {
             "Referer": f"https://{self.hostname}/RedseaPlatform/jsp/kqUni/punchCard/punchCard.jsp?agentId"
-                       f"={self.agent_id}=&isQywx=1",
+            f"={self.agent_id}=&isQywx=1",
         }
         params = {
             "method": "getDayTeam",
