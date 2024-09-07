@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any
 
 import httpx
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from ..common import config, utils
 
@@ -41,6 +42,11 @@ class NtfyClient:
             auth=httpx.BasicAuth(username, password) if username and password else None,
         )
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(1),
+        retry=retry_if_exception_type(httpx.TimeoutException),
+    )
     async def send(
         self,
         topic: str,
