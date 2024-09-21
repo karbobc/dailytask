@@ -24,14 +24,20 @@ async def lazy() -> None:
         data = await redsea.touch_fish_state()
         data = data.get("kqCountSimple", {})
         touch_fish_start_time = data.get("sbDkTime") or data.get("sbDkTime2") or data.get("sbDkTime3")
-        touch_fish_start_state = data.get("sbStatusName") or data.get("sbStatusName2") or data.get("sbStatusName3")
+        touch_fish_start_state = (
+            data.get("sbStatusName") or data.get("sbStatusName2") or data.get("sbStatusName3") or "正常"
+        )
         touch_fish_start_state_emoji = "✅" if touch_fish_start_state == "正常" else "❌"
         touch_fish_end_time = data.get("xbDkTime") or data.get("xbDkTime2") or data.get("xbDkTime3")
-        touch_fish_end_state = data.get("xbStatusName") or data.get("xbStatusName2") or data.get("xbStatusName3")
+        touch_fish_end_state = (
+            data.get("xbStatusName") or data.get("xbStatusName2") or data.get("xbStatusName3") or "正常"
+        )
         touch_fish_end_state_emoji = "✅" if touch_fish_end_state == "正常" else "❌"
         message = (
             f"💤：{touch_fish_start_time} {touch_fish_start_state} {touch_fish_start_state_emoji}\n"
             f"🎉：{touch_fish_end_time} {touch_fish_end_state} {touch_fish_end_state_emoji}"
+            if touch_fish_end_time is not None
+            else ""
         )
         await ntfy.send(topic="daily", title=f"⏰{current_state}", message=message)
     except Exception:
