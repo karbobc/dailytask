@@ -2,6 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 import asyncio
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from enum import Enum
@@ -166,13 +167,13 @@ async def get_cron_task() -> Response:
     return ApiResult.ok(data=data)
 
 
-@app.put("/api/task/cron/pause/{id}")
+@app.patch("/api/task/cron/pause/{id}")
 async def pause_cron_task(task_id: str = Path(alias="id")) -> Response:
     await async_scheduler.pause_schedule(task_id)
     return ApiResult.ok()
 
 
-@app.put("/api/task/cron/resume/{id}")
+@app.patch("/api/task/cron/resume/{id}")
 async def resume_cron_task(task_id: str = Path(alias="id")) -> Response:
     await async_scheduler.unpause_schedule(task_id)
     return ApiResult.ok()
@@ -195,20 +196,28 @@ async def get_date_task() -> Response:
     return ApiResult.ok(data=data)
 
 
-@app.post("/api/task/date")
-async def new_date_task(run_time: datetime = Body(embed=True), task_type: TaskType = Body(embed=True)) -> Response:
-    if task_type == TaskType.YUNYU:
-        func = yunyu_scheduler.fetch_daily_bills
-    elif task_type == TaskType.REDSEA:
-        func = redsea_scheduler.lazy
-    else:
+@app.post("/api/task")
+async def new_task(
+    run_time: datetime | None = Body(default=None, embed=True), task_type: TaskType = Body(embed=True)
+) -> Response:
+    func: Callable | None
+    match task_type:
+        case TaskType.YUNYU:
+            func = yunyu_scheduler.fetch_daily_bills
+        case TaskType.REDSEA:
+            func = redsea_scheduler.lazy
+        case _:
+            func = None
+    if func is None:
         return ApiResult.e(status.HTTP_400_BAD_REQUEST, "Unsupported task type")
-    task_id = await async_scheduler.add_schedule(func, trigger=DateTrigger(run_time))
-    data = DateTask(
-        id=task_id,
-        run_time=run_time.strftime(DATETIME_FORMATTER),
-        task_type=task_type,
+    task_id = await (
+        async_scheduler.add_schedule(func, trigger=DateTrigger(run_time)) if run_time else async_scheduler.add_job(func)
     )
+    data = {
+        "id": task_id,
+        **({"run_time": run_time.strftime(DATETIME_FORMATTER)} if run_time else {}),
+        "task_type": task_type,
+    }
     return ApiResult.ok(data=data)
 
 
