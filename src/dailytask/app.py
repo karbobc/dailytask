@@ -4,6 +4,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from apscheduler import AsyncScheduler, Schedule
@@ -52,9 +53,15 @@ class ApiResult(BaseModel):
         )
 
 
+class TaskType(Enum):
+    YUNYU = "yunyu"
+    REDSEA = "redsea"
+
+
 class DateTask(BaseModel):
     id: str
     run_time: str
+    task_type: TaskType
 
 
 class CronTask(BaseModel):
@@ -63,6 +70,7 @@ class CronTask(BaseModel):
     next_run_time: str
     last_run_time: str | None
     running: bool
+    task_type: TaskType
 
 
 class SchedulerMiddleware:
@@ -92,6 +100,7 @@ async def lifespan(app: FastAPI):
             async_scheduler.add_schedule(
                 yunyu_scheduler.fetch_daily_bills,
                 trigger=CronTrigger.from_crontab(cron),
+                kwargs={"task_type": TaskType.YUNYU},
             )
         )
         log.info("starting yunyu cron: %s", cron)
@@ -100,6 +109,7 @@ async def lifespan(app: FastAPI):
             async_scheduler.add_schedule(
                 redsea_scheduler.lazy_with_random_delay_in_workday,
                 trigger=CronTrigger.from_crontab(cron),
+                kwargs={"task_type": TaskType.REDSEA},
             )
         )
         log.info("starting redsea cron: %s", cron)
@@ -150,6 +160,7 @@ async def get_cron_task() -> Response:
                 if scheduler.last_fire_time
                 else None,
                 running=not scheduler.paused,
+                task_type=scheduler.kwargs.get("task_type"),
             )
         )
     return ApiResult.ok(data=data)
@@ -174,14 +185,30 @@ async def get_date_task() -> Response:
     data = []
     for scheduler in filtered_schedulers:
         trigger: DateTrigger = scheduler.trigger
-        data.append(DateTask(id=scheduler.id, run_time=trigger.run_time.strftime(DATETIME_FORMATTER)))
+        data.append(
+            DateTask(
+                id=scheduler.id,
+                run_time=trigger.run_time.strftime(DATETIME_FORMATTER),
+                task_type=scheduler.kwargs.get("task_type"),
+            )
+        )
     return ApiResult.ok(data=data)
 
 
 @app.post("/api/task/date")
-async def new_date_task(run_time: datetime = Body(embed=True)) -> Response:
-    task_id = await async_scheduler.add_schedule(redsea_scheduler.lazy, trigger=DateTrigger(run_time))
-    data = {"id": task_id, "run_time": run_time.strftime(DATETIME_FORMATTER)}
+async def new_date_task(run_time: datetime = Body(embed=True), task_type: TaskType = Body(embed=True)) -> Response:
+    if task_type == TaskType.YUNYU:
+        func = yunyu_scheduler.fetch_daily_bills
+    elif task_type == TaskType.REDSEA:
+        func = redsea_scheduler.lazy
+    else:
+        return ApiResult.e(status.HTTP_400_BAD_REQUEST, "Unsupported task type")
+    task_id = await async_scheduler.add_schedule(func, trigger=DateTrigger(run_time))
+    data = DateTask(
+        id=task_id,
+        run_time=run_time.strftime(DATETIME_FORMATTER),
+        task_type=task_type,
+    )
     return ApiResult.ok(data=data)
 
 
