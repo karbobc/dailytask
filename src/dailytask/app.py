@@ -211,7 +211,9 @@ async def new_task(
     if func is None:
         return ApiResult.e(status.HTTP_400_BAD_REQUEST, "Unsupported task type")
     task_id = await (
-        async_scheduler.add_schedule(func, trigger=DateTrigger(run_time)) if run_time else async_scheduler.add_job(func)
+        async_scheduler.add_schedule(func, trigger=DateTrigger(run_time), kwargs={"task_type": task_type})
+        if run_time
+        else async_scheduler.add_job(func)
     )
     data = {
         "id": task_id,
