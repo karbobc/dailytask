@@ -1,14 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 
-import asyncio
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from apscheduler import AsyncScheduler, Schedule
+from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from fastapi import Body, FastAPI, Path, Request, Response, status
@@ -22,6 +21,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from .common import config, utils
 from .scheduler import redsea_scheduler, yunyu_scheduler
 
+# simple database
+db: list["Task"] = []
 async_scheduler = AsyncScheduler()
 log = utils.get_logger("uvicorn")
 DATETIME_FORMATTER = "%Y-%m-%d %H:%M:%S"
@@ -74,6 +75,11 @@ class CronTask(BaseModel):
     task_type: TaskType
 
 
+class Task(BaseModel):
+    id: str
+    type: TaskType
+
+
 class SchedulerMiddleware:
     def __init__(
         self,
@@ -95,26 +101,20 @@ class SchedulerMiddleware:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("API_TOKEN: %s", config.API_TOKEN)
-    tasks = []
     for cron in config.YUNYU_CRON:
-        tasks.append(
-            async_scheduler.add_schedule(
-                yunyu_scheduler.fetch_daily_bills,
-                trigger=CronTrigger.from_crontab(cron),
-                kwargs={"task_type": TaskType.YUNYU},
-            )
+        task_id = await async_scheduler.add_schedule(
+            yunyu_scheduler.fetch_daily_bills,
+            trigger=CronTrigger.from_crontab(cron),
         )
+        db.append(Task(id=task_id, type=TaskType.YUNYU))
         log.info("starting yunyu cron: %s", cron)
     for cron in config.REDSEA_CRON:
-        tasks.append(
-            async_scheduler.add_schedule(
-                redsea_scheduler.lazy_with_random_delay_in_workday,
-                trigger=CronTrigger.from_crontab(cron),
-                kwargs={"task_type": TaskType.REDSEA},
-            )
+        task_id = await async_scheduler.add_schedule(
+            redsea_scheduler.lazy_with_random_delay_in_workday,
+            trigger=CronTrigger.from_crontab(cron),
         )
+        db.append(Task(id=task_id, type=TaskType.REDSEA))
         log.info("starting redsea cron: %s", cron)
-    await asyncio.gather(*tasks)
     yield
 
 
@@ -147,21 +147,20 @@ async def validation_exception_handler(request: Request, e: RequestValidationErr
 
 @app.get("/api/task/cron")
 async def get_cron_task() -> Response:
-    schedulers = await async_scheduler.get_schedules()
-    filtered_schedulers: list[Schedule] = list(filter(lambda x: isinstance(x.trigger, CronTrigger), schedulers))
     data = []
-    for scheduler in filtered_schedulers:
-        trigger: CronTrigger = scheduler.trigger
+    for task in db:
+        schedule = await async_scheduler.get_schedule(task.id)
+        if not isinstance(schedule.trigger, CronTrigger):
+            continue
+        trigger: CronTrigger = schedule.trigger
         data.append(
             CronTask(
-                id=scheduler.id,
+                id=task.id,
                 cron=" ".join([trigger.minute, trigger.hour, trigger.day, trigger.month, trigger.day_of_week]),
-                next_run_time=scheduler.next_fire_time.strftime(DATETIME_FORMATTER),
-                last_run_time=scheduler.last_fire_time.strftime(DATETIME_FORMATTER)
-                if scheduler.last_fire_time
-                else None,
-                running=not scheduler.paused,
-                task_type=scheduler.kwargs.get("task_type"),
+                next_run_time=schedule.next_fire_time.strftime(DATETIME_FORMATTER),
+                last_run_time=schedule.last_fire_time.strftime(DATETIME_FORMATTER) if schedule.last_fire_time else None,
+                running=not schedule.paused,
+                task_type=task.type,
             )
         )
     return ApiResult.ok(data=data)
@@ -181,16 +180,17 @@ async def resume_cron_task(task_id: str = Path(alias="id")) -> Response:
 
 @app.get("/api/task/date")
 async def get_date_task() -> Response:
-    schedulers = await async_scheduler.get_schedules()
-    filtered_schedulers: list[Schedule] = list(filter(lambda x: isinstance(x.trigger, DateTrigger), schedulers))
     data = []
-    for scheduler in filtered_schedulers:
-        trigger: DateTrigger = scheduler.trigger
+    for task in db:
+        schedule = await async_scheduler.get_schedule(task.id)
+        if not isinstance(schedule.trigger, DateTrigger):
+            continue
+        trigger: DateTrigger = schedule.trigger
         data.append(
             DateTask(
-                id=scheduler.id,
+                id=task.id,
                 run_time=trigger.run_time.strftime(DATETIME_FORMATTER),
-                task_type=scheduler.kwargs.get("task_type"),
+                task_type=task.type,
             )
         )
     return ApiResult.ok(data=data)
@@ -211,14 +211,15 @@ async def new_task(
     if func is None:
         return ApiResult.e(status.HTTP_400_BAD_REQUEST, "Unsupported task type")
     task_id = await (
-        async_scheduler.add_schedule(func, trigger=DateTrigger(run_time), kwargs={"task_type": task_type})
-        if run_time
-        else async_scheduler.add_job(func)
+        async_scheduler.add_schedule(func, trigger=DateTrigger(run_time)) if run_time else async_scheduler.add_job(func)
     )
+    # update task into db
+    global db
+    db.append(Task(id=task_id, type=task_type))
     data = {
         "id": task_id,
         **({"run_time": run_time.strftime(DATETIME_FORMATTER)} if run_time else {}),
-        "task_type": task_type,
+        "type": task_type,
     }
     return ApiResult.ok(data=data)
 
@@ -226,12 +227,21 @@ async def new_task(
 @app.delete("/api/task/date/{id}")
 async def delete_date_task(task_id: str = Path(alias="id")) -> Response:
     await async_scheduler.remove_schedule(task_id)
+    # remove task from db
+    global db
+    db = list(filter(lambda x: x.id != task_id, db))
     return ApiResult.ok()
 
 
 @app.delete("/api/task/date")
 async def delete_all_date_task() -> Response:
-    schedulers = await async_scheduler.get_schedules()
-    for item in schedulers:
-        await async_scheduler.remove_schedule(item.id)
+    global db
+    # db slice
+    for task in db[:]:
+        schedule = await async_scheduler.get_schedule(task.id)
+        if not isinstance(schedule.trigger, DateTrigger):
+            continue
+        await async_scheduler.remove_schedule(task.id)
+        # remove task from db
+        db.remove(task)
     return ApiResult.ok()
