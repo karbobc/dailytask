@@ -233,7 +233,7 @@ async def new_task(
     data = {
         "id": task_id,
         **({"run_time": run_time.strftime(DATETIME_FORMATTER)} if run_time else {}),
-        "type": task_type,
+        "task_type": task_type,
     }
     return ApiResult.ok(data=data)
 
