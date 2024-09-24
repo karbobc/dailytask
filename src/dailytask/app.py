@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from apscheduler import AsyncScheduler
+from apscheduler import AsyncScheduler, ScheduleLookupError
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from fastapi import Body, FastAPI, Path, Request, Response, status
@@ -148,8 +148,13 @@ async def validation_exception_handler(request: Request, e: RequestValidationErr
 @app.get("/api/task/cron")
 async def get_cron_task() -> Response:
     data = []
-    for task in db:
-        schedule = await async_scheduler.get_schedule(task.id)
+    global db
+    for task in db[:]:
+        try:
+            schedule = await async_scheduler.get_schedule(task.id)
+        except ScheduleLookupError:
+            db.remove(task)
+            continue
         if not isinstance(schedule.trigger, CronTrigger):
             continue
         trigger: CronTrigger = schedule.trigger
@@ -181,8 +186,13 @@ async def resume_cron_task(task_id: str = Path(alias="id")) -> Response:
 @app.get("/api/task/date")
 async def get_date_task() -> Response:
     data = []
-    for task in db:
-        schedule = await async_scheduler.get_schedule(task.id)
+    global db
+    for task in db[:]:
+        try:
+            schedule = await async_scheduler.get_schedule(task.id)
+        except ScheduleLookupError:
+            db.remove(task)
+            continue
         if not isinstance(schedule.trigger, DateTrigger):
             continue
         trigger: DateTrigger = schedule.trigger
@@ -210,8 +220,12 @@ async def new_task(
             func = None
     if func is None:
         return ApiResult.e(status.HTTP_400_BAD_REQUEST, "Unsupported task type")
-    task_id = await (
-        async_scheduler.add_schedule(func, trigger=DateTrigger(run_time)) if run_time else async_scheduler.add_job(func)
+    task_id = str(
+        await (
+            async_scheduler.add_schedule(func, trigger=DateTrigger(run_time))
+            if run_time
+            else async_scheduler.add_job(func)
+        )
     )
     # update task into db
     global db
@@ -227,21 +241,17 @@ async def new_task(
 @app.delete("/api/task/date/{id}")
 async def delete_date_task(task_id: str = Path(alias="id")) -> Response:
     await async_scheduler.remove_schedule(task_id)
-    # remove task from db
-    global db
-    db = list(filter(lambda x: x.id != task_id, db))
     return ApiResult.ok()
 
 
 @app.delete("/api/task/date")
 async def delete_all_date_task() -> Response:
-    global db
-    # db slice
-    for task in db[:]:
-        schedule = await async_scheduler.get_schedule(task.id)
+    for task in db:
+        try:
+            schedule = await async_scheduler.get_schedule(task.id)
+        except ScheduleLookupError:
+            continue
         if not isinstance(schedule.trigger, DateTrigger):
             continue
         await async_scheduler.remove_schedule(task.id)
-        # remove task from db
-        db.remove(task)
     return ApiResult.ok()
