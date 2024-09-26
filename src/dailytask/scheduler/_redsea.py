@@ -33,12 +33,9 @@ async def lazy() -> None:
             data.get("xbStatusName") or data.get("xbStatusName2") or data.get("xbStatusName3") or "正常"
         )
         touch_fish_end_state_emoji = "✅" if touch_fish_end_state == "正常" else "❌"
-        message = (
-            f"💤：{touch_fish_start_time} {touch_fish_start_state} {touch_fish_start_state_emoji}\n"
-            f"🎉：{touch_fish_end_time} {touch_fish_end_state} {touch_fish_end_state_emoji}"
-            if touch_fish_end_time is not None
-            else ""
-        )
+        message = f"💤：{touch_fish_start_time} {touch_fish_start_state} {touch_fish_start_state_emoji}"
+        if touch_fish_end_time:
+            message += f"\n🎉：{touch_fish_end_time} {touch_fish_end_state} {touch_fish_end_state_emoji}"
         await ntfy.send(topic="daily", title=f"⏰{current_state}", message=message)
     except Exception:
         log.error("touching fish error!!!", exc_info=True)
