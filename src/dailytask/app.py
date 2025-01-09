@@ -15,6 +15,7 @@ from fastapi.exceptions import (
     RequestValidationError,
     StarletteHTTPException,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -120,6 +121,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(SchedulerMiddleware, scheduler=async_scheduler)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 @app.middleware("http")
