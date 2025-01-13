@@ -23,10 +23,10 @@ async def fetch_daily_bills() -> None:
         balance = await yunyu.fetch_prepay_balance()
         data: dict[str, Any] = data["content"][0]
         message = (
-            f"结算时间: {datetime.fromtimestamp(int(data["consumeDate"]) / 1000).strftime("%Y-%m-%d %H:%M:%S")}\n"
-            f"用电量: {data["avgUsing"]}度\n"
-            f"单价: {data["unitPrice"]} × {data["rate"]}\n"
-            f"小计: {data["fee"]}\n"
+            f"结算时间: {datetime.fromtimestamp(int(data['consumeDate']) / 1000).strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"用电量: {data['avgUsing']}度\n"
+            f"单价: {data['unitPrice']} × {data['rate']}\n"
+            f"小计: {data['fee']}\n"
             f"余额: {balance}"
         )
         await ntfy.send(topic="daily", title="电费账单", message=message)
