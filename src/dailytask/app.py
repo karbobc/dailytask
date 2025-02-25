@@ -126,6 +126,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.middleware("http")
 async def interceptor(request: Request, call_next) -> Response:
+    if request.method == "OPTIONS":
+        return Response()
     token = request.headers.get("Authorization")
     if token == config.API_TOKEN:
         return await call_next(request)
