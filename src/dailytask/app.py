@@ -126,10 +126,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.middleware("http")
 async def interceptor(request: Request, call_next) -> Response:
-    if request.method == "OPTIONS":
-        return Response()
-    token = request.headers.get("Authorization")
-    if token == config.API_TOKEN:
+    if request.method == "OPTIONS" or config.API_TOKEN == request.headers.get("Authorization"):
         return await call_next(request)
     return ApiResult.e(status.HTTP_401_UNAUTHORIZED, "Unauthorized")
 
