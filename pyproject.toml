@@ -1,6 +1,6 @@
 [project]
 name = "dailytask"
-version = "0.2.8"
+version = "0.2.9"
 description = "My Daily Task"
 authors = [
     { name = "Karbob", email = "karbobc@gmail.com" }
@@ -9,7 +9,7 @@ dependencies = [
     "httpx>=0.27.0",
     "tenacity>=8.5.0",
     "fastapi[standard]>=0.114.0",
-    "apscheduler>=4.0.0a5",
+    "apscheduler>=4.0.0a6",
 ]
 requires-python = ">= 3.10"
 

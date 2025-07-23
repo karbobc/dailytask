@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 
+import asyncio
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -24,6 +25,7 @@ from .scheduler import redsea_scheduler, yunyu_scheduler
 
 # simple database
 db: list["Task"] = []
+db_lock = asyncio.Lock()
 async_scheduler = AsyncScheduler()
 log = utils.get_logger("uvicorn")
 DATETIME_FORMATTER = "%Y-%m-%d %H:%M:%S"
@@ -107,14 +109,16 @@ async def lifespan(app: FastAPI):
             yunyu_scheduler.fetch_daily_bills,
             trigger=CronTrigger.from_crontab(cron),
         )
-        db.append(Task(id=task_id, type=TaskType.YUNYU))
+        async with db_lock:
+            db.append(Task(id=task_id, type=TaskType.YUNYU))
         log.info("starting yunyu cron: %s", cron)
     for cron in config.REDSEA_CRON:
         task_id = await async_scheduler.add_schedule(
             redsea_scheduler.lazy_with_random_delay_in_workday,
             trigger=CronTrigger.from_crontab(cron),
         )
-        db.append(Task(id=task_id, type=TaskType.REDSEA))
+        async with db_lock:
+            db.append(Task(id=task_id, type=TaskType.REDSEA))
         log.info("starting redsea cron: %s", cron)
     yield
 
@@ -149,12 +153,12 @@ async def validation_exception_handler(request: Request, e: RequestValidationErr
 @app.get("/api/task/cron")
 async def get_cron_task() -> Response:
     data = []
-    global db
     for task in db[:]:
         try:
             schedule = await async_scheduler.get_schedule(task.id)
         except ScheduleLookupError:
-            db.remove(task)
+            async with db_lock:
+                db.remove(task)
             continue
         if not isinstance(schedule.trigger, CronTrigger):
             continue
@@ -180,7 +184,33 @@ async def pause_cron_task(task_id: str = Path(alias="id")) -> Response:
 
 @app.patch("/api/task/cron/resume/{id}")
 async def resume_cron_task(task_id: str = Path(alias="id")) -> Response:
-    await async_scheduler.unpause_schedule(task_id)
+    schedule = await async_scheduler.get_schedule(task_id)
+    if not isinstance(schedule.trigger, CronTrigger):
+        return ApiResult.ok()
+
+    trigger: CronTrigger = schedule.trigger
+
+    for task in db[:]:
+        if task.id != task_id:
+            continue
+        await async_scheduler.remove_schedule(task_id)
+        func: Callable
+        match task.type:
+            case TaskType.YUNYU:
+                func = yunyu_scheduler.fetch_daily_bills
+            case TaskType.REDSEA:
+                func = redsea_scheduler.lazy_with_random_delay_in_workday
+            case _:
+                continue
+        task_id = await async_scheduler.add_schedule(
+            func,
+            trigger=CronTrigger.from_crontab(
+                " ".join([trigger.minute, trigger.hour, trigger.day, trigger.month, trigger.day_of_week])
+            ),
+        )
+        async with db_lock:
+            db.append(Task(id=task_id, type=task.type))
+
     return ApiResult.ok()
 
 
@@ -229,8 +259,8 @@ async def new_task(
         )
     )
     # update task into db
-    global db
-    db.append(Task(id=task_id, type=task_type))
+    async with db_lock:
+        db.append(Task(id=task_id, type=task_type))
     data = {
         "id": task_id,
         **({"run_time": run_time.strftime(DATETIME_FORMATTER)} if run_time else {}),
